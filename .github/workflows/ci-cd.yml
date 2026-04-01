@@ -1,0 +1,180 @@
+# Pipeline CI/CD VytalSync – GitHub Actions
+#
+# Choix GitHub Actions : intégré nativement à GitHub, pas d'infrastructure
+# externe à gérer, marketplace d'actions riche, gratuit pour les repos publics.
+#
+# Déclencheurs :
+#   - push sur develop : intégration continue après chaque commit de feature
+#   - pull_request vers main : vérification obligatoire avant merge en production
+#
+# Pourquoi ces deux déclencheurs ?
+#   - develop : détecte les régressions au plus tôt, feedback rapide aux devs
+#   - PR vers main : dernière ligne de défense avant mise en production
+
+name: CI/CD VytalSync
+
+permissions:
+  contents: read
+  packages: write
+
+on:
+  push:
+    branches:
+      - develop
+  pull_request:
+    branches:
+      - main
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_BACKEND: ghcr.io/${{ github.repository_owner }}/vytalsync-backend
+  IMAGE_FRONTEND: ghcr.io/${{ github.repository_owner }}/vytalsync-frontend
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Stage 1 – Lint & Tests
+# Installe les dépendances, exécute ESLint et Jest.
+# Si un test ou une règle ESLint échoue, les stages suivants ne s'exécutent pas.
+# ─────────────────────────────────────────────────────────────────────────────
+jobs:
+  lint-test:
+    name: Lint & Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Run ESLint
+        working-directory: backend
+        run: npm run lint
+
+      - name: Run Jest tests
+        working-directory: backend
+        run: npm test
+        env:
+          NODE_ENV: test
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Stage 2 – Build & Push Docker images
+# Construit les images backend et frontend, les tague avec le SHA du commit
+# (tracabilité exacte), et les pousse vers GHCR.
+#
+# Pourquoi le tag SHA plutôt que "latest" ?
+#   - "latest" est ambigu : on ne sait pas quelle version est réellement déployée
+#   - Le SHA identifie précisément le commit → rollback possible à tout moment
+#   - Permet de déployer plusieurs versions en parallèle (staging vs prod)
+#
+# Choix GHCR : intégré à GitHub, authentification avec GITHUB_TOKEN (pas de
+# secret externe à créer), stockage gratuit pour les repos publics.
+# ─────────────────────────────────────────────────────────────────────────────
+  build-push:
+    name: Build & Push Docker images
+    runs-on: ubuntu-latest
+    needs: lint-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          # GITHUB_TOKEN est automatiquement fourni par GitHub Actions
+          # → aucun secret manuel à configurer pour GHCR
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build & push backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            ${{ env.IMAGE_BACKEND }}:${{ github.sha }}
+            ${{ env.IMAGE_BACKEND }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build & push frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: true
+          tags: |
+            ${{ env.IMAGE_FRONTEND }}:${{ github.sha }}
+            ${{ env.IMAGE_FRONTEND }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Stage 3 – Deploy staging & Health check
+# Lance les 3 services via docker-compose, attend leur démarrage, puis vérifie
+# que le backend répond correctement sur /health.
+# La pipeline ÉCHOUE si le health check ne répond pas HTTP 200.
+#
+# L'environnement staging est simulé en local (runner GitHub Actions) via
+# docker-compose – pas besoin de serveur dédié pour valider l'intégration.
+# ─────────────────────────────────────────────────────────────────────────────
+  deploy-staging:
+    name: Deploy staging & Health check
+    runs-on: ubuntu-latest
+    needs: build-push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create .env for staging
+        run: |
+          cat <<EOF > .env
+          POSTGRES_DB=vytalsync_test
+          POSTGRES_USER=vytalsync_user
+          POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+          NODE_ENV=production
+          PORT=3000
+          DATABASE_URL=postgresql://vytalsync_user:${{ secrets.POSTGRES_PASSWORD }}@db:5432/vytalsync_test
+          EOF
+
+      - name: Start services with docker compose
+        run: docker compose up -d --build
+
+      - name: Wait for backend to be ready (max 60s)
+        run: |
+          echo "Waiting for backend health check..."
+          for i in $(seq 1 12); do
+            if curl -sf http://localhost:3000/health; then
+              echo "Backend is healthy!"
+              exit 0
+            fi
+            echo "Attempt $i/12 failed, retrying in 5s..."
+            sleep 5
+          done
+          echo "ERROR: backend health check failed after 60s"
+          docker compose logs backend
+          exit 1
+
+      - name: Verify all containers are running
+        run: |
+          docker ps
+          docker compose ps
+
+      - name: Tear down staging environment
+        if: always()
+        run: docker compose down -v

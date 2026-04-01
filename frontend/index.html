@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VytalSync – Suivi médical & sportif</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f0f4f8; color: #1a202c; }
+    header { background: #1e3a5f; color: #fff; padding: 1rem 2rem; display: flex; align-items: center; gap: 1rem; }
+    header h1 { font-size: 1.5rem; }
+    header span { font-size: 0.85rem; opacity: 0.7; }
+    main { max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+    .card { background: #fff; border-radius: 12px; padding: 1.5rem; box-shadow: 0 2px 8px rgba(0,0,0,.08); text-align: center; }
+    .card .value { font-size: 2.2rem; font-weight: 700; color: #1e3a5f; }
+    .card .label { font-size: 0.85rem; color: #718096; margin-top: 0.4rem; }
+    .status-bar { background: #fff; border-radius: 12px; padding: 1rem 1.5rem; box-shadow: 0 2px 8px rgba(0,0,0,.08); display: flex; align-items: center; gap: 0.75rem; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: #48bb78; }
+    .dot.error { background: #f56565; }
+    button { margin-left: auto; background: #1e3a5f; color: #fff; border: none; border-radius: 8px; padding: 0.5rem 1.2rem; cursor: pointer; font-size: 0.9rem; }
+    button:hover { background: #2a4a7f; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>💓 VytalSync</h1>
+    <span>Suivi médical &amp; sportif</span>
+  </header>
+  <main>
+    <div class="cards" id="vitals-cards">
+      <div class="card"><div class="value" id="heartRate">—</div><div class="label">Fréquence cardiaque (bpm)</div></div>
+      <div class="card"><div class="value" id="steps">—</div><div class="label">Pas aujourd'hui</div></div>
+      <div class="card"><div class="value" id="calories">—</div><div class="label">Calories brûlées (kcal)</div></div>
+      <div class="card"><div class="value" id="hydration">—</div><div class="label">Hydratation (L)</div></div>
+    </div>
+    <div class="status-bar">
+      <div class="dot" id="status-dot"></div>
+      <span id="status-text">Vérification de l'API…</span>
+      <button onclick="loadVitals()">Actualiser</button>
+    </div>
+  </main>
+  <script>
+    async function loadVitals() {
+      try {
+        const [vitals, health] = await Promise.all([
+          fetch('/api/vitals').then(r => r.json()),
+          fetch('/health').then(r => r.json()),
+        ]);
+        document.getElementById('heartRate').textContent = vitals.heartRate;
+        document.getElementById('steps').textContent = vitals.steps.toLocaleString();
+        document.getElementById('calories').textContent = vitals.calories;
+        document.getElementById('hydration').textContent = vitals.hydration.toFixed(1);
+        document.getElementById('status-dot').className = 'dot';
+        document.getElementById('status-text').textContent = 'API connectée – ' + health.timestamp;
+      } catch (e) {
+        document.getElementById('status-dot').className = 'dot error';
+        document.getElementById('status-text').textContent = 'Erreur : impossible de joindre l\'API';
+      }
+    }
+    loadVitals();
+  </script>
+</body>
+</html>

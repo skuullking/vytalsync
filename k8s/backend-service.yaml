@@ -1,0 +1,26 @@
+# Service Kubernetes – Backend VytalSync
+#
+# Un Service est une abstraction réseau stable devant un groupe de pods.
+# Comme les pods ont des IPs éphémères (changent à chaque redémarrage),
+# le Service fournit une IP virtuelle et un DNS stable (vytalsync-backend).
+#
+# Type ClusterIP : accessible uniquement à l'intérieur du cluster.
+# Le frontend (Nginx) communique avec le backend via ce Service, sans
+# exposer le backend directement à Internet.
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: vytalsync-backend
+  labels:
+    app: vytalsync
+    tier: backend
+spec:
+  type: ClusterIP
+  selector:
+    app: vytalsync
+    tier: backend
+  ports:
+    - protocol: TCP
+      port: 3000
+      targetPort: 3000

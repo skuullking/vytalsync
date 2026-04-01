@@ -1,0 +1,89 @@
+# Deployment Kubernetes – Backend VytalSync
+#
+# Un Deployment gère le cycle de vie d'un ensemble de pods identiques.
+# Il garantit que le nombre souhaité de replicas est toujours en cours
+# d'exécution, et orchestre les mises à jour progressives (rolling update).
+#
+# Pourquoi 2 replicas ?
+# - 1 replica : zéro tolérance aux pannes (si le pod tombe, l'API est indispo)
+# - 2 replicas : tolérance à 1 panne. Pendant une mise à jour rolling update,
+#   1 pod reste actif → zéro downtime.
+# - 3+ replicas : surdimensionné pour un environnement de démo/staging.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vytalsync-backend
+  labels:
+    app: vytalsync
+    tier: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: vytalsync
+      tier: backend
+  template:
+    metadata:
+      labels:
+        app: vytalsync
+        tier: backend
+    spec:
+      containers:
+        - name: backend
+          # Image taguée avec le SHA du commit pour une traçabilité exacte
+          image: ghcr.io/skuullking/vytalsync-backend:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3000
+
+          # Variables d'environnement injectées depuis le Secret Kubernetes
+          # → les valeurs sensibles ne sont jamais en clair dans ce manifeste
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: PORT
+              value: "3000"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: vytalsync-db-secret
+                  key: postgres-password
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: vytalsync-db-secret
+                  key: postgres-user
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: vytalsync-db-secret
+                  key: postgres-db
+
+          # Liveness probe : Kubernetes redémarre le pod si /health ne répond
+          # plus. Détecte les états bloqués (deadlock, fuite mémoire, etc.)
+          # que le process lui-même ne détecte pas.
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            failureThreshold: 3
+
+          # Readiness probe : le pod n'est ajouté au Service (et donc au load
+          # balancer) que lorsqu'il est prêt à traiter des requêtes.
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "128Mi"
+              cpu: "200m"

@@ -1,0 +1,72 @@
+version: '3.9'
+
+services:
+
+  backend:
+    build:
+      context: ./backend
+      target: production
+    container_name: vytalsync-backend
+    env_file: .env
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - vitalsync-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: vytalsync-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - vitalsync-net
+    restart: unless-stopped
+
+  db:
+    image: postgres:15-alpine
+    container_name: vytalsync-db
+    env_file: .env
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      # Volume persistant : sans lui, toutes les données sont perdues au
+      # docker-compose down. Avec lui, elles survivent aux redémarrages.
+      - pg_data:/var/lib/postgresql/data
+    networks:
+      - vitalsync-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+# Réseau bridge dédié : les conteneurs communiquent entre eux par leur nom
+# de service (ex: "backend", "db") sans être exposés sur le réseau hôte par
+# défaut. Meilleure isolation que le réseau bridge par défaut de Docker.
+networks:
+  vitalsync-net:
+    driver: bridge
+
+# Volume nommé géré par Docker : les données PostgreSQL persistent entre
+# les redémarrages et les recreations de conteneurs.
+volumes:
+  pg_data:

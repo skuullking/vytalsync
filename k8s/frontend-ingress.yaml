@@ -1,0 +1,105 @@
+# Ingress + Service frontend VytalSync
+#
+# Choix Ingress vs NodePort/LoadBalancer :
+# - NodePort : expose un port aléatoire sur chaque nœud. Simple mais peu
+#   professionnel (URLs avec ports non-standard) et difficile à gérer en prod.
+# - LoadBalancer : crée un load balancer cloud (AWS ELB, GCP LB…).
+#   Coûteux si on a beaucoup de services.
+# - Ingress : un seul point d'entrée HTTP/HTTPS pour tous les services,
+#   routage par host ou path, terminaison TLS centralisée.
+#   Solution recommandée en production.
+#
+# Le Service de type ClusterIP expose le pod frontend en interne,
+# et l'Ingress route le trafic externe vers ce Service.
+
+# Service ClusterIP pour le frontend
+apiVersion: v1
+kind: Service
+metadata:
+  name: vytalsync-frontend
+  labels:
+    app: vytalsync
+    tier: frontend
+spec:
+  type: ClusterIP
+  selector:
+    app: vytalsync
+    tier: frontend
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+
+---
+
+# Déploiement du frontend
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vytalsync-frontend
+  labels:
+    app: vytalsync
+    tier: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vytalsync
+      tier: frontend
+  template:
+    metadata:
+      labels:
+        app: vytalsync
+        tier: frontend
+    spec:
+      containers:
+        - name: frontend
+          image: ghcr.io/skuullking/vytalsync-frontend:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              memory: "16Mi"
+              cpu: "10m"
+            limits:
+              memory: "64Mi"
+              cpu: "100m"
+
+---
+
+# Ingress – expose le frontend à l'extérieur du cluster
+# Nécessite un Ingress Controller (ex: nginx-ingress) installé dans le cluster
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vytalsync-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: vytalsync.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: vytalsync-frontend
+                port:
+                  number: 80
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: vytalsync-backend
+                port:
+                  number: 3000
+          - path: /health
+            pathType: Prefix
+            backend:
+              service:
+                name: vytalsync-backend
+                port:
+                  number: 3000
