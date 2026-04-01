@@ -31,7 +31,7 @@ app.get('/api/vitals', (req, res) => {
     heartRate: 72,
     steps: 8420,
     calories: 340,
-    hydration: 1.8,
+  hydration: 1.8,
     sources: ['wearable-sensor', 'manual-input'],
   });
 });
@@ -39,7 +39,8 @@ app.get('/api/vitals', (req, res) => {
 // Start server only when not in test mode
 if (process.env.NODE_ENV !== 'test') {
   app.listen(PORT, () => {
-    console.log(`VytalSync backend running on port ${PORT}`);
+// eslint-disable-next-line no-console
+  console.log(`VytalSync backend running on port ${PORT}`);
   });
 }
 
