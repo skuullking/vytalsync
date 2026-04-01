@@ -146,14 +146,20 @@ jobs:
           cat <<EOF > .env
           POSTGRES_DB=vytalsync_test
           POSTGRES_USER=vytalsync_user
-          POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_PASSWORD=vytalsync_password
           NODE_ENV=production
           PORT=3000
-          DATABASE_URL=postgresql://vytalsync_user:${{ secrets.POSTGRES_PASSWORD }}@db:5432/vytalsync_test
+          DATABASE_URL=postgresql://vytalsync_user:vytalsync_password@db:5432/vytalsync_test
           EOF
 
       - name: Start services with docker compose
         run: docker compose up -d --build
+
+      - name: Show compose status and logs on failure
+        if: failure()
+        run: |
+          docker compose ps
+          docker compose logs db
 
       - name: Wait for backend to be ready (max 60s)
         run: |
