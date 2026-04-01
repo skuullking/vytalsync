@@ -54,10 +54,10 @@ services:
       - vitalsync-net
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
-      interval: 10s
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 12
 
 # Réseau bridge dédié : les conteneurs communiquent entre eux par leur nom
 # de service (ex: "backend", "db") sans être exposés sur le réseau hôte par
